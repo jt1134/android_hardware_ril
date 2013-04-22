@@ -3304,6 +3304,11 @@ RIL_requestTimedCallback (RIL_TimedCallback callback, void *param,
     internalRequestTimedCallback (callback, param, relativeTime);
 }
 
+extern "C" int64_t
+RIL_elapsedRealtime() {
+    return elapsedRealtime();
+}
+
 const char *
 failCauseToString(RIL_Errno e) {
     switch(e) {

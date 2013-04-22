@@ -3971,6 +3971,8 @@ void RIL_requestTimedCallback (RIL_TimedCallback callback,
                                void *param, const struct timeval *relativeTime);
 
 
+int64_t RIL_elapsedRealtime();
+
 #endif /* RIL_SHLIB */
 
 #ifdef __cplusplus
