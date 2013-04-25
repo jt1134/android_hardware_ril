@@ -234,6 +234,9 @@ static int responseCdmaSignalInfoRecord(Parcel &p,void *response, size_t respons
 static int responseCdmaCallWaiting(Parcel &p,void *response, size_t responselen);
 static int responseSimRefresh(Parcel &p, void *response, size_t responselen);
 
+// additions
+static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen);
+
 static int decodeVoiceRadioTechnology (RIL_RadioState radioState);
 static int decodeCdmaSubscriptionSource (RIL_RadioState radioState);
 static RIL_RadioState processRadioState(RIL_RadioState newRadioState);
@@ -2348,6 +2351,55 @@ static int responseCdmaSms(Parcel &p, void *response, size_t responselen) {
     closeResponse;
 
     return 0;
+}
+
+// additions
+static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen) {
+    int numStrings;
+
+    if (response == NULL && responselen != 0) {
+        ALOGE("invalid response: NULL");
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+    if (responselen % sizeof(char *) != 0) {
+        ALOGE("invalid response length %d expected multiple of %d\n",
+            (int)responselen, (int)sizeof(char *));
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+
+    if (response != NULL) {
+        char **p_cur = (char **) response;
+        numStrings = responselen / sizeof(char *);
+        // The binary RIL shorts us a response, the PRL. We need to tack it on
+        // to the end of this parcel. The original value is in the format of :
+        // "P:55555        ". We only need the 5 digits, the rest is discarded.
+        if (numStrings == 4) {
+            char tmp[PROPERTY_VALUE_MAX];
+            property_get("ril.prl_ver_1", tmp, NULL);
+            char *buf = strtok(tmp, ":");
+            if (buf != NULL && !strcmp(buf, "P")) {
+                buf = strtok(NULL, " ");
+                if (strlen(buf) != 5) {
+                    buf = NULL;
+                }
+            }
+            p_cur[numStrings] = strdup(buf);
+            numStrings++;
+            responselen = numStrings * sizeof(char *);
+        }
+        p.writeInt32 (numStrings);
+
+        /* each string */
+        startResponse;
+        for (int i = 0 ; i < numStrings ; i++) {
+            appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
+            writeStringToParcel (p, p_cur[i]);
+        }
+        removeLastChar;
+        closeResponse;
+    }
+
+    return responseStrings(p, response, responselen);
 }
 
 /**

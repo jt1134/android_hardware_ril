@@ -109,7 +109,7 @@
     {RIL_REQUEST_CDMA_GET_BROADCAST_SMS_CONFIG, dispatchVoid, responseCdmaBrSmsCnf},
     {RIL_REQUEST_CDMA_SET_BROADCAST_SMS_CONFIG, dispatchCdmaBrSmsCnf, responseVoid},
     {RIL_REQUEST_CDMA_SMS_BROADCAST_ACTIVATION, dispatchInts, responseVoid},
-    {RIL_REQUEST_CDMA_SUBSCRIPTION, dispatchVoid, responseStrings},
+    {RIL_REQUEST_CDMA_SUBSCRIPTION, dispatchVoid, responseStringsCdmaSubscription},
     {RIL_REQUEST_CDMA_WRITE_SMS_TO_RUIM, dispatchRilCdmaSmsWriteArgs, responseInts},
     {RIL_REQUEST_CDMA_DELETE_SMS_ON_RUIM, dispatchInts, responseVoid},
     {RIL_REQUEST_DEVICE_IDENTITY, dispatchVoid, responseStrings},
