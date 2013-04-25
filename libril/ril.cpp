@@ -2437,11 +2437,6 @@ static void processCommandsCallback(int fd, short flags, void *param) {
 
 
 static void onNewCommandConnect() {
-    // Inform we are connected and the ril version
-    int rilVer = s_callbacks.version;
-    RIL_onUnsolicitedResponse(RIL_UNSOL_RIL_CONNECTED,
-                                    &rilVer, sizeof(rilVer));
-
     // implicit radio state changed
     RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED,
                                     NULL, 0);
