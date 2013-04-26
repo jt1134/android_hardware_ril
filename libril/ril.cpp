@@ -236,6 +236,7 @@ static int responseSimRefresh(Parcel &p, void *response, size_t responselen);
 
 // additions
 static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen);
+static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size_t responselen);
 
 static int decodeVoiceRadioTechnology (RIL_RadioState radioState);
 static int decodeCdmaSubscriptionSource (RIL_RadioState radioState);
@@ -2388,6 +2389,47 @@ static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t res
             responselen = numStrings * sizeof(char *);
         }
         p.writeInt32 (numStrings);
+
+        /* each string */
+        startResponse;
+        for (int i = 0 ; i < numStrings ; i++) {
+            appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
+            writeStringToParcel (p, p_cur[i]);
+        }
+        removeLastChar;
+        closeResponse;
+    }
+
+    return responseStrings(p, response, responselen);
+}
+
+static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size_t responselen) {
+    int numStrings;
+
+    if (response == NULL && responselen != 0) {
+        ALOGE("invalid response: NULL");
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+    if (responselen % sizeof(char *) != 0) {
+        ALOGE("invalid response length %d expected multiple of %d\n",
+            (int)responselen, (int)sizeof(char *));
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+
+    if (response != NULL) {
+        char **p_cur = (char **) response;
+
+        numStrings = responselen / sizeof(char *);
+        p.writeInt32 (numStrings);
+
+        // The Samsung RIL sends baseStationId, baseStationId, and baseStationId
+        // in hexadecimal, when the upper layer expects them in decimal. Convert
+        // and re-inject their values.
+        if (numStrings > 6) {
+            sprintf(p_cur[4], "%d", atoi(p_cur[4]));
+            sprintf(p_cur[5], "%d", atoi(p_cur[5]));
+            sprintf(p_cur[6], "%d", atoi(p_cur[6]));
+        }
 
         /* each string */
         startResponse;
