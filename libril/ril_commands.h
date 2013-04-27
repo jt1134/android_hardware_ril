@@ -55,7 +55,7 @@
     {RIL_REQUEST_GET_IMEI, dispatchVoid, responseString},
     {RIL_REQUEST_GET_IMEISV, dispatchVoid, responseString},
     {RIL_REQUEST_ANSWER,dispatchVoid, responseVoid},
-    {RIL_REQUEST_DEACTIVATE_DATA_CALL, dispatchStrings, responseVoid},
+    {RIL_REQUEST_DEACTIVATE_DATA_CALL, dispatchStrings, responseVoidDeactivateDataCall},
     {RIL_REQUEST_QUERY_FACILITY_LOCK, dispatchStrings, responseInts},
     {RIL_REQUEST_SET_FACILITY_LOCK, dispatchStrings, responseInts},
     {RIL_REQUEST_CHANGE_BARRING_PASSWORD, dispatchStrings, responseVoid},

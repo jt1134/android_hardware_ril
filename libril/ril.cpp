@@ -235,9 +235,11 @@ static int responseCdmaCallWaiting(Parcel &p,void *response, size_t responselen)
 static int responseSimRefresh(Parcel &p, void *response, size_t responselen);
 
 // additions
+static int responseDataCallListChanged(Parcel &p, void *response, size_t responselen);
 static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen);
 static int responseStringsOperator(Parcel &p, void *response, size_t responselen);
 static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size_t responselen);
+static int responseVoidDeactivateDataCall(Parcel &p, void *response, size_t responselen);
 
 static int decodeVoiceRadioTechnology (RIL_RadioState radioState);
 static int decodeCdmaSubscriptionSource (RIL_RadioState radioState);
@@ -1573,8 +1575,11 @@ static int responseSMS(Parcel &p, void *response, size_t responselen) {
     return 0;
 }
 
-static int responseDataCallListV4(Parcel &p, void *response, size_t responselen)
+static int responseDataCallListChanged(Parcel &p, void *response, size_t responselen)
 {
+    // Write version
+    p.writeInt32(s_callbacks.version);
+
     if (response == NULL && responselen != 0) {
         ALOGE("invalid response: NULL");
         return RIL_ERRNO_INVALID_RESPONSE;
@@ -1583,26 +1588,30 @@ static int responseDataCallListV4(Parcel &p, void *response, size_t responselen)
     if (responselen % sizeof(RIL_Data_Call_Response_v4) != 0) {
         ALOGE("invalid response length %d expected multiple of %d",
                 (int)responselen, (int)sizeof(RIL_Data_Call_Response_v4));
+        ALOGE("[CM-RIL] : Set ril.cdma.data_state=0 to make sure pppd_cdma is stopped.\n");
+        property_set("ril.cdma.data_state", "0");
         return RIL_ERRNO_INVALID_RESPONSE;
     }
+
+    char tmp[PROPERTY_VALUE_MAX];
+    property_get("net.ppp0.local-ip", tmp, NULL);
+    char *addresses = strdup(tmp);
 
     int num = responselen / sizeof(RIL_Data_Call_Response_v4);
     p.writeInt32(num);
 
     RIL_Data_Call_Response_v4 *p_cur = (RIL_Data_Call_Response_v4 *) response;
     startResponse;
-    int i;
-    for (i = 0; i < num; i++) {
+    for (int i = 0; i < num; i++) {
         p.writeInt32(p_cur[i].cid);
         p.writeInt32(p_cur[i].active);
-        writeStringToParcel(p, p_cur[i].type);
-        // apn is not used, so don't send.
-        writeStringToParcel(p, p_cur[i].address);
+        writeStringToParcel(p, "IP"); //type
+        writeStringToParcel(p, addresses);
         appendPrintBuf("%s[cid=%d,%s,%s,%s],", printBuf,
             p_cur[i].cid,
             (p_cur[i].active==0)?"down":"up",
-            (char*)p_cur[i].type,
-            (char*)p_cur[i].address);
+            "IP", //type
+            addresses);
     }
     removeLastChar;
     closeResponse;
@@ -1610,66 +1619,108 @@ static int responseDataCallListV4(Parcel &p, void *response, size_t responselen)
     return 0;
 }
 
+bool startPppdCdmaService() {
+    char state[PROPERTY_VALUE_MAX];
+    // Connecting: Set ril.cdma.data_state=1 to (re)start pppd_cdma service,
+    // which responds by setting ril.cdma.data_state=2 once connection is up.
+    property_set("ril.cdma.data_state", "1");
+    ALOGD("[CM-RIL] : Set ril.cdma.data_state=1, waiting for ril.cdma.data_state=2.");
+
+    // Typically takes < 200 ms on my Epic, so sleep in 100 ms intervals.
+    for (int i = 0; i < 10; i++) {
+        usleep(100000);
+        property_get("ril.cdma.data_state", state, "1");
+        if (atoi(state) == 2) {
+            ALOGD("[CM-RIL] : Got ril.cdma.data_state=2, connected.");
+            return true;
+        }
+    }
+
+    // Taking > 1 s here, try up to 10 s, which is hopefully long enough.
+    for (int i = 0; i < 10; i++) {
+        sleep(1);
+        property_get("ril.cdma.data_state", state, "1");
+        if (atoi(state) == 2) {
+            ALOGD("[CM-RIL] : Got ril.cdma.data_state=2, connected.");
+            return true;
+        }
+    }
+
+    // Disconnect: Set ril.cdma.data_state=0 to stop pppd_cdma service.
+    ALOGE("[CM-RIL] : Didn't get ril.cdma.data_state=2 timely, aborting.");
+    property_set("ril.cdma.data_state", "0");
+
+    return false;
+}
+
 static int responseDataCallList(Parcel &p, void *response, size_t responselen)
 {
     // Write version
     p.writeInt32(s_callbacks.version);
 
-    if (s_callbacks.version < 5) {
-        return responseDataCallListV4(p, response, responselen);
-    } else {
-        if (response == NULL && responselen != 0) {
-            ALOGE("invalid response: NULL");
-            return RIL_ERRNO_INVALID_RESPONSE;
-        }
-
-        if (responselen % sizeof(RIL_Data_Call_Response_v6) != 0) {
-            ALOGE("invalid response length %d expected multiple of %d",
-                    (int)responselen, (int)sizeof(RIL_Data_Call_Response_v6));
-            return RIL_ERRNO_INVALID_RESPONSE;
-        }
-
-        int num = responselen / sizeof(RIL_Data_Call_Response_v6);
-        p.writeInt32(num);
-
-        RIL_Data_Call_Response_v6 *p_cur = (RIL_Data_Call_Response_v6 *) response;
-        startResponse;
-        int i;
-        for (i = 0; i < num; i++) {
-            p.writeInt32((int)p_cur[i].status);
-            p.writeInt32(p_cur[i].suggestedRetryTime);
-            p.writeInt32(p_cur[i].cid);
-            p.writeInt32(p_cur[i].active);
-            writeStringToParcel(p, p_cur[i].type);
-            writeStringToParcel(p, p_cur[i].ifname);
-            writeStringToParcel(p, p_cur[i].addresses);
-            writeStringToParcel(p, p_cur[i].dnses);
-            writeStringToParcel(p, p_cur[i].gateways);
-            appendPrintBuf("%s[status=%d,retry=%d,cid=%d,%s,%s,%s,%s,%s,%s],", printBuf,
-                p_cur[i].status,
-                p_cur[i].suggestedRetryTime,
-                p_cur[i].cid,
-                (p_cur[i].active==0)?"down":"up",
-                (char*)p_cur[i].type,
-                (char*)p_cur[i].ifname,
-                (char*)p_cur[i].addresses,
-                (char*)p_cur[i].dnses,
-                (char*)p_cur[i].gateways);
-        }
-        removeLastChar;
-        closeResponse;
+    if (response == NULL && responselen != 0) {
+        ALOGE("invalid response: NULL");
+        return RIL_ERRNO_INVALID_RESPONSE;
     }
+
+    // This parcel is malformed already o_0
+    if ((responselen % sizeof(char *) != 0) ||
+        (responselen / sizeof(char *) <= 1)) {
+        ALOGE("invalid response length %d expected multiple of %d\n",
+            (int)responselen, (int)sizeof(char *));
+        ALOGE("[CM-RIL] : Set ril.cdma.data_state=0 to make sure pppd_cdma is stopped.\n");
+        property_set("ril.cdma.data_state", "0");
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+
+    // Start up the pppd daemon
+    if (!startPppdCdmaService()) return RIL_ERRNO_INVALID_RESPONSE;
+
+    char tmp[PROPERTY_VALUE_MAX];
+    property_get("net.cdma.ppp.interface", tmp, NULL);
+    char *ifname = strdup(tmp);
+
+    property_get("net.ppp0.local-ip", tmp, NULL);
+    char *addresses = strdup(tmp);
+
+    property_get("net.ppp0.dns1", tmp, NULL);
+    char *dns1 = strdup(tmp);
+
+    property_get("net.ppp0.dns2", tmp, NULL);
+    char *dns2 = strdup(tmp);
+
+    sprintf(tmp, "%s,%s", dns1, dns2); //derps
+    char *dnses = strdup(tmp);
+    ALOGI("[CM-RIL] : DNSES = %s ####\n", dnses);
+
+    property_get("net.ppp0.remote-ip", tmp, NULL);
+    char *gateways = strdup(tmp);
+
+    p.writeInt32(5); // number of strings
+
+    startResponse;
+    writeStringToParcel(p, "1"); //cid
+    writeStringToParcel(p, ifname);
+    writeStringToParcel(p, addresses);
+    writeStringToParcel(p, dns1); //hax
+    writeStringToParcel(p, gateways);
+
+    appendPrintBuf("%s[cid=%s,%s,%s,%s,%s],", printBuf,
+        "1", //cid
+        ifname,
+        addresses,
+        dns1, //hax
+        gateways);
+
+    removeLastChar;
+    closeResponse;
 
     return 0;
 }
 
 static int responseSetupDataCall(Parcel &p, void *response, size_t responselen)
 {
-    if (s_callbacks.version < 5) {
-        return responseStringsWithVersion(s_callbacks.version, p, response, responselen);
-    } else {
-        return responseDataCallList(p, response, responselen);
-    }
+    return responseDataCallList(p, response, responselen);
 }
 
 static int responseRaw(Parcel &p, void *response, size_t responselen) {
@@ -2472,6 +2523,13 @@ static int responseStringsOperator(Parcel &p, void *response, size_t responselen
     }
 
     return 0;
+}
+
+static int responseVoidDeactivateDataCall(Parcel &p, void *response, size_t responselen) {
+    // Disconnect: Set ril.cdma.data_state=0 to stop pppd_cdma service.
+    ALOGD("[CM-RIL] : Set ril.cdma.data_state=0.");
+    property_set("ril.cdma.data_state", "0");
+    return responseVoid(p, response, responselen);
 }
 
 /**
