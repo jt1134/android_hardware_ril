@@ -2352,7 +2352,9 @@ static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t res
         return RIL_ERRNO_INVALID_RESPONSE;
     }
 
-    if (response != NULL) {
+    if (response == NULL) {
+        p.writeInt32(0);
+    } else {
         char **p_cur = (char **) response;
         numStrings = responselen / sizeof(char *);
         // The binary RIL shorts us a response, the PRL. We need to tack it on
@@ -2384,7 +2386,7 @@ static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t res
         closeResponse;
     }
 
-    return responseStrings(p, response, responselen);
+    return 0;
 }
 
 static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size_t responselen) {
@@ -2400,7 +2402,9 @@ static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size
         return RIL_ERRNO_INVALID_RESPONSE;
     }
 
-    if (response != NULL) {
+    if (response == NULL) {
+        p.writeInt32(0);
+    } else {
         char **p_cur = (char **) response;
 
         numStrings = responselen / sizeof(char *);
@@ -2425,7 +2429,7 @@ static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size
         closeResponse;
     }
 
-    return responseStrings(p, response, responselen);
+    return 0;
 }
 
 /**
