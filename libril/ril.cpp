@@ -236,6 +236,7 @@ static int responseSimRefresh(Parcel &p, void *response, size_t responselen);
 
 // additions
 static int responseDataCallListChanged(Parcel &p, void *response, size_t responselen);
+static int responseIntsLastCallFailCause(Parcel &p, void *response, size_t responselen);
 static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen);
 static int responseStringsDeviceIdentity(Parcel &p, void *response, size_t responselen);
 static int responseStringsOperator(Parcel &p, void *response, size_t responselen);
@@ -2617,6 +2618,44 @@ static int responseVoidDeactivateDataCall(Parcel &p, void *response, size_t resp
     ALOGD("[CM-RIL] : Set ril.cdma.data_state=0.");
     property_set("ril.cdma.data_state", "0");
     return responseVoid(p, response, responselen);
+}
+
+static int responseIntsLastCallFailCause(Parcel &p, void *response, size_t responselen) {
+    int numInts;
+    int ERROR_UNSPECIFIED = 0xffff;
+    int NORMAL_CLEARING   = 16;
+
+    if (response == NULL && responselen != 0) {
+        ALOGE("invalid response: NULL");
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+    if (responselen % sizeof(int) != 0) {
+        ALOGE("invalid response length %d expected multiple of %d\n",
+            (int)responselen, (int)sizeof(int));
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+
+    int *p_int = (int *) response;
+
+    numInts = responselen / sizeof(int *);
+    p.writeInt32 (numInts);
+
+    if (numInts > 0 && p_int[0] == ERROR_UNSPECIFIED) {
+        // Far-end hangup returns ERROR_UNSPECIFIED, which shows "Call Lost" dialog.
+        ALOGD("[CM-RIL] : Overriding ERROR_UNSPECIFIED fail cause with NORMAL_CLEARING.");
+        p_int[0] = NORMAL_CLEARING;
+    }
+
+    /* each int */
+    startResponse;
+    for (int i = 0 ; i < numInts ; i++) {
+        appendPrintBuf("%s%d,", printBuf, p_int[i]);
+        p.writeInt32(p_int[i]);
+    }
+    removeLastChar;
+    closeResponse;
+
+    return 0;
 }
 
 /**
