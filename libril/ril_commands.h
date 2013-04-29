@@ -112,7 +112,7 @@
     {RIL_REQUEST_CDMA_SUBSCRIPTION, dispatchVoid, responseStringsCdmaSubscription},
     {RIL_REQUEST_CDMA_WRITE_SMS_TO_RUIM, dispatchRilCdmaSmsWriteArgs, responseInts},
     {RIL_REQUEST_CDMA_DELETE_SMS_ON_RUIM, dispatchInts, responseVoid},
-    {RIL_REQUEST_DEVICE_IDENTITY, dispatchVoid, responseStrings},
+    {RIL_REQUEST_DEVICE_IDENTITY, dispatchVoid, responseStringsDeviceIdentity},
     {RIL_REQUEST_EXIT_EMERGENCY_CALLBACK_MODE, dispatchVoid, responseVoid},
     {RIL_REQUEST_GET_SMSC_ADDRESS, dispatchVoid, responseString},
     {RIL_REQUEST_SET_SMSC_ADDRESS, dispatchString, responseVoid},

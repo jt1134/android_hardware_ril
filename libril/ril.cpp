@@ -237,6 +237,7 @@ static int responseSimRefresh(Parcel &p, void *response, size_t responselen);
 // additions
 static int responseDataCallListChanged(Parcel &p, void *response, size_t responselen);
 static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen);
+static int responseStringsDeviceIdentity(Parcel &p, void *response, size_t responselen);
 static int responseStringsOperator(Parcel &p, void *response, size_t responselen);
 static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size_t responselen);
 static int responseVoidDeactivateDataCall(Parcel &p, void *response, size_t responselen);
@@ -2511,6 +2512,45 @@ static int responseStringsOperator(Parcel &p, void *response, size_t responselen
         char tmp[PROPERTY_VALUE_MAX];
         property_get("ro.cdma.home.operator.numeric", tmp, "310004"); //hardcoded ur mom
         p_cur[2] = strdup(tmp);
+
+        /* each string */
+        startResponse;
+        for (int i = 0 ; i < numStrings ; i++) {
+            appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
+            writeStringToParcel (p, p_cur[i]);
+        }
+        removeLastChar;
+        closeResponse;
+    }
+
+    return 0;
+}
+
+static int responseStringsDeviceIdentity(Parcel &p, void *response, size_t responselen) {
+    int numStrings;
+
+    if (response == NULL && responselen != 0) {
+        ALOGE("invalid response: NULL");
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+    if (responselen % sizeof(char *) != 0) {
+        ALOGE("invalid response length %d expected multiple of %d\n",
+            (int)responselen, (int)sizeof(char *));
+        return RIL_ERRNO_INVALID_RESPONSE;
+    }
+
+    if (response == NULL) {
+        p.writeInt32(0);
+    } else {
+        char **p_cur = (char **) response;
+        numStrings = responselen / sizeof(char *);
+
+        // Read hex MEID from system properties
+        char tmp[PROPERTY_VALUE_MAX];
+        property_get("ro.ril.MEID", tmp, NULL);
+        p_cur[3] = strdup(tmp);
+
+        p.writeInt32 (numStrings);
 
         /* each string */
         startResponse;
