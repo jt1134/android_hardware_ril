@@ -56,8 +56,6 @@ extern void RIL_onUnsolicitedResponse(int unsolResponse, const void *data,
 extern void RIL_requestTimedCallback (RIL_TimedCallback callback,
                                void *param, const struct timeval *relativeTime);
 
-extern int64_t RIL_elapsedRealtime();
-
 static struct RIL_Env s_rilEnv = {
     RIL_onRequestComplete,
     RIL_onUnsolicitedResponse,

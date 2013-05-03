@@ -113,6 +113,14 @@ namespace android {
     #define appendPrintBuf(x...)
 #endif
 
+/* Samsung RIL overrides */
+#define RESPONSE_INTS_HANGUP 1
+#define RESPONSE_STRINGS_PRL 1
+#define RESPONSE_STRINGS_ROAMING 2
+#define RESPONSE_STRINGS_OPERATOR 3
+#define RESPONSE_STRINGS_MEID 4
+/* End Samsung overrides */
+
 enum WakeType {DONT_WAKE, WAKE_PARTIAL};
 
 typedef struct {
@@ -234,7 +242,9 @@ static int responseCdmaSignalInfoRecord(Parcel &p,void *response, size_t respons
 static int responseCdmaCallWaiting(Parcel &p,void *response, size_t responselen);
 static int responseSimRefresh(Parcel &p, void *response, size_t responselen);
 
-// additions
+/* Samsung RIL overrides */
+static int responseInts(Parcel &p, void *response, size_t responselen, int override);
+static int responseStrings(Parcel &p, void *response, size_t responselen, int override);
 static int responseDataCallListChanged(Parcel &p, void *response, size_t responselen);
 static int responseIntsLastCallFailCause(Parcel &p, void *response, size_t responselen);
 static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen);
@@ -242,6 +252,7 @@ static int responseStringsDeviceIdentity(Parcel &p, void *response, size_t respo
 static int responseStringsOperator(Parcel &p, void *response, size_t responselen);
 static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size_t responselen);
 static int responseVoidDeactivateDataCall(Parcel &p, void *response, size_t responselen);
+/* End Samsung overrides */
 
 static int decodeVoiceRadioTechnology (RIL_RadioState radioState);
 static int decodeCdmaSubscriptionSource (RIL_RadioState radioState);
@@ -1384,11 +1395,20 @@ sendResponse (Parcel &p) {
     return sendResponseRaw(p.data(), p.dataSize());
 }
 
-/** response is an int* pointing to an array of ints*/
+/** response is an int* pointing to an array of ints */
 
 static int
 responseInts(Parcel &p, void *response, size_t responselen) {
+    return responseInts(p, response, responselen, 0);
+}
+
+/** response is an int* pointing to an array of ints */
+
+static int
+responseInts(Parcel &p, void *response, size_t responselen, int override) {
     int numInts;
+    int ERROR_UNSPECIFIED = 0xffff;
+    int NORMAL_CLEARING   = 16;
 
     if (response == NULL && responselen != 0) {
         ALOGE("invalid response: NULL");
@@ -1403,9 +1423,24 @@ responseInts(Parcel &p, void *response, size_t responselen) {
     int *p_int = (int *) response;
 
     numInts = responselen / sizeof(int *);
+
+    /* Samsung RIL overrides */
+    switch(override) {
+        case RESPONSE_INTS_HANGUP:
+            // Far-end hangup returns ERROR_UNSPECIFIED, which shows "Call Lost" dialog.
+            if (numInts > 0 && p_int[0] == ERROR_UNSPECIFIED) {
+                ALOGD("[CM-RIL] : Overriding ERROR_UNSPECIFIED fail cause with NORMAL_CLEARING.");
+                p_int[0] = NORMAL_CLEARING;
+            }
+            break;
+        default:
+            break; // meh
+    }
+    /* End Samsung overrides */
+
     p.writeInt32 (numInts);
 
-    /* each int*/
+    /* each int */
     startResponse;
     for (int i = 0 ; i < numInts ; i++) {
         appendPrintBuf("%s%d,", printBuf, p_int[i]);
@@ -1417,7 +1452,6 @@ responseInts(Parcel &p, void *response, size_t responselen) {
     return 0;
 }
 
-
 /** response is a char **, pointing to an array of char *'s
     The parcel will begin with the version */
 static int responseStringsWithVersion(int version, Parcel &p, void *response, size_t responselen) {
@@ -1427,6 +1461,11 @@ static int responseStringsWithVersion(int version, Parcel &p, void *response, si
 
 /** response is a char **, pointing to an array of char *'s */
 static int responseStrings(Parcel &p, void *response, size_t responselen) {
+    return responseStrings(p, response, responselen, 0);
+}
+
+/** response is a char **, pointing to an array of char *'s */
+static int responseStrings(Parcel &p, void *response, size_t responselen, int override) {
     int numStrings;
 
     if (response == NULL && responselen != 0) {
@@ -1445,9 +1484,61 @@ static int responseStrings(Parcel &p, void *response, size_t responselen) {
         char **p_cur = (char **) response;
 
         numStrings = responselen / sizeof(char *);
+
+        /* Samsung RIL overrides */
+        switch(override) {
+            case RESPONSE_STRINGS_PRL:
+                // The binary RIL shorts us a response, the PRL. We need to tack it on
+                // to the end of this parcel. The original value is in the format of :
+                // "P:55555        ". We only need the 5 digits, the rest is discarded.
+                if (numStrings == 4) {
+                    char tmp[PROPERTY_VALUE_MAX];
+                    property_get("ril.prl_ver_1", tmp, NULL);
+                    char *buf = strtok(tmp, ":");
+                    if (buf != NULL && !strcmp(buf, "P")) {
+                        buf = strtok(NULL, " ");
+                        if (strlen(buf) != 5) {
+                            buf = NULL;
+                        }
+                    }
+                    p_cur[numStrings] = strdup(buf);
+                    numStrings++;
+                    responselen = numStrings * sizeof(char *);
+                }
+                break;
+            case RESPONSE_STRINGS_ROAMING:
+                // The Samsung RIL sends baseStationId, baseStationId, and baseStationId
+                // in hexadecimal, when the upper layer expects them in decimal. Convert
+                // and re-inject their values.
+                if (numStrings > 6) {
+                    sprintf(p_cur[4], "%d", atoi(p_cur[4]));
+                    sprintf(p_cur[5], "%d", atoi(p_cur[5]));
+                    sprintf(p_cur[6], "%d", atoi(p_cur[6]));
+                }
+                break;
+            case RESPONSE_STRINGS_OPERATOR:
+                // The Samsung RIL sends a bad value for ro.cdma.home.operator.numeric,
+                // retrieve it from system properties. This isn't a requirement, but it
+                // avoids annoying complaints from the upper layer.
+                char op[PROPERTY_VALUE_MAX];
+                property_get("ro.cdma.home.operator.numeric", op, NULL);
+                p_cur[2] = strdup(op);
+                break;
+            case RESPONSE_STRINGS_MEID:
+                // Read hex MEID from system properties
+                char meid[PROPERTY_VALUE_MAX];
+                property_get("ro.ril.MEID", meid, NULL);
+                p_cur[3] = strdup(meid);
+                break;
+            default:
+                if (override != 0) ALOGD("WTF is %d?\n", override); /* Que ? */
+                break;
+        }
+        /* End Samsung overrides */
+
         p.writeInt32 (numStrings);
 
-        /* each string*/
+        /* each string */
         startResponse;
         for (int i = 0 ; i < numStrings ; i++) {
             appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
@@ -1458,7 +1549,6 @@ static int responseStrings(Parcel &p, void *response, size_t responselen) {
     }
     return 0;
 }
-
 
 /**
  * NULL strings are accepted
@@ -1667,7 +1757,7 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
 
     // This parcel is malformed already o_0
     if ((responselen % sizeof(char *) != 0) ||
-        (responselen / sizeof(char *) <= 1)) {
+        (responselen / sizeof(char *) <  2)) {
         ALOGE("invalid response length %d expected multiple of %d\n",
             (int)responselen, (int)sizeof(char *));
         ALOGE("[CM-RIL] : Set ril.cdma.data_state=0 to make sure pppd_cdma is stopped.\n");
@@ -1691,9 +1781,10 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
     property_get("net.ppp0.dns2", tmp, NULL);
     char *dns2 = strdup(tmp);
 
-    sprintf(tmp, "%s,%s", dns1, dns2); //derps
+    //FIXME
+    sprintf(tmp, "%s,%s", dns1, dns2); // this is derped for some reason
     char *dnses = strdup(tmp);
-    ALOGI("[CM-RIL] : DNSES = %s ####\n", dnses);
+    ALOGD("[CM-RIL] : DNSES = %s ####\n", dnses);
 
     property_get("net.ppp0.remote-ip", tmp, NULL);
     char *gateways = strdup(tmp);
@@ -1701,7 +1792,7 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
     p.writeInt32(5); // number of strings
 
     startResponse;
-    writeStringToParcel(p, "1"); //cid
+    writeStringToParcel(p, "1"); //cid; why is this wrong ?
     writeStringToParcel(p, ifname);
     writeStringToParcel(p, addresses);
     writeStringToParcel(p, dns1); //hax
@@ -2002,7 +2093,7 @@ static int responseCdmaInformationRecords(Parcel &p,
                     infoRec->rec.signal.alertPitch == IS95_CONST_IR_ALERT_MED    &&
                     infoRec->rec.signal.signal == IS95_CONST_IR_SIG_IS54B_L) {
                     ALOGD("[CM-RIL] : Dropping RIL_UNSOL_CDMA_INFO_REC to prevent \"ring of death\" bug.\n");
-                    return 0;
+                    goto done; //bail D:
                 }
                 p.writeInt32(infoRec->rec.signal.isPresent);
                 p.writeInt32(infoRec->rec.signal.signalType);
@@ -2082,6 +2173,7 @@ static int responseCdmaInformationRecords(Parcel &p,
                 return RIL_ERRNO_INVALID_RESPONSE;
         }
     }
+done:
     closeResponse;
 
     return 0;
@@ -2439,224 +2531,29 @@ static int responseCdmaSms(Parcel &p, void *response, size_t responselen) {
     return 0;
 }
 
-// additions
+/* Samsung RIL overrides */
+static int responseIntsLastCallFailCause(Parcel &p, void *response, size_t responselen) {
+    return responseInts(p, response, responselen, RESPONSE_INTS_HANGUP);
+}
 static int responseStringsCdmaSubscription(Parcel &p, void *response, size_t responselen) {
-    int numStrings;
-
-    if (response == NULL && responselen != 0) {
-        ALOGE("invalid response: NULL");
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-    if (responselen % sizeof(char *) != 0) {
-        ALOGE("invalid response length %d expected multiple of %d\n",
-            (int)responselen, (int)sizeof(char *));
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-
-    if (response == NULL) {
-        p.writeInt32(0);
-    } else {
-        char **p_cur = (char **) response;
-        numStrings = responselen / sizeof(char *);
-        // The binary RIL shorts us a response, the PRL. We need to tack it on
-        // to the end of this parcel. The original value is in the format of :
-        // "P:55555        ". We only need the 5 digits, the rest is discarded.
-        if (numStrings == 4) {
-            char tmp[PROPERTY_VALUE_MAX];
-            property_get("ril.prl_ver_1", tmp, NULL);
-            char *buf = strtok(tmp, ":");
-            if (buf != NULL && !strcmp(buf, "P")) {
-                buf = strtok(NULL, " ");
-                if (strlen(buf) != 5) {
-                    buf = NULL;
-                }
-            }
-            p_cur[numStrings] = strdup(buf);
-            numStrings++;
-            responselen = numStrings * sizeof(char *);
-        }
-        p.writeInt32 (numStrings);
-
-        /* each string */
-        startResponse;
-        for (int i = 0 ; i < numStrings ; i++) {
-            appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
-            writeStringToParcel (p, p_cur[i]);
-        }
-        removeLastChar;
-        closeResponse;
-    }
-
-    return 0;
+    return responseStrings(p, response, responselen, RESPONSE_STRINGS_PRL);
 }
-
 static int responseStringsVoiceRegistrationState(Parcel &p, void *response, size_t responselen) {
-    int numStrings;
-
-    if (response == NULL && responselen != 0) {
-        ALOGE("invalid response: NULL");
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-    if (responselen % sizeof(char *) != 0) {
-        ALOGE("invalid response length %d expected multiple of %d\n",
-            (int)responselen, (int)sizeof(char *));
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-
-    if (response == NULL) {
-        p.writeInt32(0);
-    } else {
-        char **p_cur = (char **) response;
-
-        numStrings = responselen / sizeof(char *);
-        p.writeInt32 (numStrings);
-
-        // The Samsung RIL sends baseStationId, baseStationId, and baseStationId
-        // in hexadecimal, when the upper layer expects them in decimal. Convert
-        // and re-inject their values.
-        if (numStrings > 6) {
-            sprintf(p_cur[4], "%d", atoi(p_cur[4]));
-            sprintf(p_cur[5], "%d", atoi(p_cur[5]));
-            sprintf(p_cur[6], "%d", atoi(p_cur[6]));
-        }
-
-        /* each string */
-        startResponse;
-        for (int i = 0 ; i < numStrings ; i++) {
-            appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
-            writeStringToParcel (p, p_cur[i]);
-        }
-        removeLastChar;
-        closeResponse;
-    }
-
-    return 0;
+    return responseStrings(p, response, responselen, RESPONSE_STRINGS_ROAMING);
 }
-
 static int responseStringsOperator(Parcel &p, void *response, size_t responselen) {
-    int numStrings;
-
-    if (response == NULL && responselen != 0) {
-        ALOGE("invalid response: NULL");
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-    if (responselen % sizeof(char *) != 0) {
-        ALOGE("invalid response length %d expected multiple of %d\n",
-            (int)responselen, (int)sizeof(char *));
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-
-    if (response == NULL) {
-        p.writeInt32(0);
-    } else {
-        char **p_cur = (char **) response;
-
-        numStrings = responselen / sizeof(char *);
-        p.writeInt32 (numStrings);
-
-        // The Samsung RIL sends a bad value for ro.cdma.home.operator.numeric,
-        // retrieve it from system properties. This isn't a requirement, but it
-        // avoids annoying complaints from the upper layer.
-        char tmp[PROPERTY_VALUE_MAX];
-        property_get("ro.cdma.home.operator.numeric", tmp, "310004"); //hardcoded ur mom
-        p_cur[2] = strdup(tmp);
-
-        /* each string */
-        startResponse;
-        for (int i = 0 ; i < numStrings ; i++) {
-            appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
-            writeStringToParcel (p, p_cur[i]);
-        }
-        removeLastChar;
-        closeResponse;
-    }
-
-    return 0;
+    return responseStrings(p, response, responselen, RESPONSE_STRINGS_OPERATOR);
 }
-
 static int responseStringsDeviceIdentity(Parcel &p, void *response, size_t responselen) {
-    int numStrings;
-
-    if (response == NULL && responselen != 0) {
-        ALOGE("invalid response: NULL");
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-    if (responselen % sizeof(char *) != 0) {
-        ALOGE("invalid response length %d expected multiple of %d\n",
-            (int)responselen, (int)sizeof(char *));
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-
-    if (response == NULL) {
-        p.writeInt32(0);
-    } else {
-        char **p_cur = (char **) response;
-        numStrings = responselen / sizeof(char *);
-
-        // Read hex MEID from system properties
-        char tmp[PROPERTY_VALUE_MAX];
-        property_get("ro.ril.MEID", tmp, NULL);
-        p_cur[3] = strdup(tmp);
-
-        p.writeInt32 (numStrings);
-
-        /* each string */
-        startResponse;
-        for (int i = 0 ; i < numStrings ; i++) {
-            appendPrintBuf("%s%s,", printBuf, (char*)p_cur[i]);
-            writeStringToParcel (p, p_cur[i]);
-        }
-        removeLastChar;
-        closeResponse;
-    }
-
-    return 0;
+    return responseStrings(p, response, responselen, RESPONSE_STRINGS_MEID);
 }
-
 static int responseVoidDeactivateDataCall(Parcel &p, void *response, size_t responselen) {
     // Disconnect: Set ril.cdma.data_state=0 to stop pppd_cdma service.
     ALOGD("[CM-RIL] : Set ril.cdma.data_state=0.");
     property_set("ril.cdma.data_state", "0");
     return responseVoid(p, response, responselen);
 }
-
-static int responseIntsLastCallFailCause(Parcel &p, void *response, size_t responselen) {
-    int numInts;
-    int ERROR_UNSPECIFIED = 0xffff;
-    int NORMAL_CLEARING   = 16;
-
-    if (response == NULL && responselen != 0) {
-        ALOGE("invalid response: NULL");
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-    if (responselen % sizeof(int) != 0) {
-        ALOGE("invalid response length %d expected multiple of %d\n",
-            (int)responselen, (int)sizeof(int));
-        return RIL_ERRNO_INVALID_RESPONSE;
-    }
-
-    int *p_int = (int *) response;
-
-    numInts = responselen / sizeof(int *);
-    p.writeInt32 (numInts);
-
-    if (numInts > 0 && p_int[0] == ERROR_UNSPECIFIED) {
-        // Far-end hangup returns ERROR_UNSPECIFIED, which shows "Call Lost" dialog.
-        ALOGD("[CM-RIL] : Overriding ERROR_UNSPECIFIED fail cause with NORMAL_CLEARING.");
-        p_int[0] = NORMAL_CLEARING;
-    }
-
-    /* each int */
-    startResponse;
-    for (int i = 0 ; i < numInts ; i++) {
-        appendPrintBuf("%s%d,", printBuf, p_int[i]);
-        p.writeInt32(p_int[i]);
-    }
-    removeLastChar;
-    closeResponse;
-
-    return 0;
-}
+/* End Samsung overrides */
 
 /**
  * A write on the wakeup fd is done just to pop us out of select()
