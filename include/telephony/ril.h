@@ -3793,6 +3793,8 @@ typedef struct {
  */
 #define RIL_UNSOL_VOICE_RADIO_TECH_CHANGED 1035
 
+/* Samsung additions */
+#define RIL_UNSOL_GPS_NOTI 11009
 
 /***********************************************************************/
 
