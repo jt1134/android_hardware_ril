@@ -1434,6 +1434,7 @@ responseInts(Parcel &p, void *response, size_t responselen, int override) {
             }
             break;
         default:
+            if (override != 0) ALOGD("[CM-RIL] : WTF is %d?\n", override); /* Que ? */
             break; // meh
     }
     /* End Samsung overrides */
@@ -1520,18 +1521,22 @@ static int responseStrings(Parcel &p, void *response, size_t responselen, int ov
                 // The Samsung RIL sends a bad value for ro.cdma.home.operator.numeric,
                 // retrieve it from system properties. This isn't a requirement, but it
                 // avoids annoying complaints from the upper layer.
-                char op[PROPERTY_VALUE_MAX];
-                property_get("ro.cdma.home.operator.numeric", op, NULL);
-                p_cur[2] = strdup(op);
+                if (numStrings > 2) {
+                    char op[PROPERTY_VALUE_MAX];
+                    property_get("ro.cdma.home.operator.numeric", op, NULL);
+                    p_cur[2] = strdup(op);
+                }
                 break;
             case RESPONSE_STRINGS_MEID:
                 // Read hex MEID from system properties
-                char meid[PROPERTY_VALUE_MAX];
-                property_get("ro.ril.MEID", meid, NULL);
-                p_cur[3] = strdup(meid);
+                if (numStrings > 3) {
+                    char meid[PROPERTY_VALUE_MAX];
+                    property_get("ro.ril.MEID", meid, NULL);
+                    p_cur[3] = strdup(meid);
+                }
                 break;
             default:
-                if (override != 0) ALOGD("WTF is %d?\n", override); /* Que ? */
+                if (override != 0) ALOGD("[CM-RIL] : WTF is %d?\n", override); /* Que ? */
                 break;
         }
         /* End Samsung overrides */
@@ -1697,12 +1702,12 @@ static int responseDataCallListChanged(Parcel &p, void *response, size_t respons
     for (int i = 0; i < num; i++) {
         p.writeInt32(p_cur[i].cid);
         p.writeInt32(p_cur[i].active);
-        writeStringToParcel(p, "IP"); //type
+        writeStringToParcel(p, (p_cur[i].type == NULL) ? "IP" : p_cur[i].type);
         writeStringToParcel(p, addresses);
         appendPrintBuf("%s[cid=%d,%s,%s,%s],", printBuf,
             p_cur[i].cid,
-            (p_cur[i].active==0)?"down":"up",
-            "IP", //type
+            (p_cur[i].active == 0) ? "down" : "up",
+            (char *)p_cur[i].type,
             addresses);
     }
     removeLastChar;
@@ -1757,7 +1762,7 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
 
     // This parcel is malformed already o_0
     if ((responselen % sizeof(char *) != 0) ||
-        (responselen / sizeof(char *) <  2)) {
+        (responselen / sizeof(char *) <  3)) {
         ALOGE("invalid response length %d expected multiple of %d\n",
             (int)responselen, (int)sizeof(char *));
         ALOGE("[CM-RIL] : Set ril.cdma.data_state=0 to make sure pppd_cdma is stopped.\n");
@@ -1781,10 +1786,8 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
     property_get("net.ppp0.dns2", tmp, NULL);
     char *dns2 = strdup(tmp);
 
-    //FIXME
-    sprintf(tmp, "%s,%s", dns1, dns2); // this is derped for some reason
+    sprintf(tmp, "%s %s", dns1, dns2);
     char *dnses = strdup(tmp);
-    ALOGD("[CM-RIL] : DNSES = %s ####\n", dnses);
 
     property_get("net.ppp0.remote-ip", tmp, NULL);
     char *gateways = strdup(tmp);
@@ -1795,14 +1798,14 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
     writeStringToParcel(p, "1"); //cid; why is this wrong ?
     writeStringToParcel(p, ifname);
     writeStringToParcel(p, addresses);
-    writeStringToParcel(p, dns1); //hax
+    writeStringToParcel(p, dnses);
     writeStringToParcel(p, gateways);
 
     appendPrintBuf("%s[cid=%s,%s,%s,%s,%s],", printBuf,
         "1", //cid
         ifname,
         addresses,
-        dns1, //hax
+        dnses,
         gateways);
 
     removeLastChar;
@@ -2192,7 +2195,8 @@ static int responseRilSignalStrength(Parcel &p,
         p.writeInt32(p_cur->GW_SignalStrength.signalStrength);
         p.writeInt32(p_cur->GW_SignalStrength.bitErrorRate);
         p.writeInt32(p_cur->CDMA_SignalStrength.dbm);
-        p.writeInt32(-(p_cur->CDMA_SignalStrength.ecio)); // Samsung: Flip ECIO
+        int ecio = p_cur->CDMA_SignalStrength.ecio;
+        p.writeInt32((ecio > 0) ? ecio : -ecio); // Samsung: Flip ECIO if it is negative
         p.writeInt32(p_cur->EVDO_SignalStrength.dbm);
         p.writeInt32(p_cur->EVDO_SignalStrength.ecio);
         p.writeInt32(p_cur->EVDO_SignalStrength.signalNoiseRatio);
@@ -2213,12 +2217,7 @@ static int responseRilSignalStrength(Parcel &p,
                 p_cur->CDMA_SignalStrength.ecio,
                 p_cur->EVDO_SignalStrength.dbm,
                 p_cur->EVDO_SignalStrength.ecio,
-                p_cur->EVDO_SignalStrength.signalNoiseRatio,
-                p_cur->LTE_SignalStrength.signalStrength,
-                p_cur->LTE_SignalStrength.rsrp,
-                p_cur->LTE_SignalStrength.rsrq,
-                p_cur->LTE_SignalStrength.rssnr,
-                p_cur->LTE_SignalStrength.cqi);
+                p_cur->EVDO_SignalStrength.signalNoiseRatio);
         closeResponse;
 
     } else {
